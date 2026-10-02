@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bom Jesus Financeiro v1.3</title>
+<title>Bom Jesus Financeiro v1.5</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Saira+Condensed:ital,wght@0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
@@ -193,7 +193,7 @@ pre.sql{background:#16171a;color:#e9e9e9;padding:12px;overflow-x:auto;font-size:
       <button data-t="cadastros">Cadastros</button>
       <button data-t="config">Configurações</button>
     </nav>
-    <div class="rodape"><span class="status" id="status"><i></i><span>Dados neste computador</span></span><br>Versão 1.3</div>
+    <div class="rodape"><span class="status" id="status"><i></i><span>Dados neste aparelho</span></span><br>Versão 1.5</div>
   </aside>
   <main id="conteudo"><p>Carregando…</p></main>
 </div>
@@ -277,8 +277,8 @@ function base(){
 }
 function normalizar(){['categorias','centros','lancamentos','compras','contratos','fornecedores','receber','clientes','recorrentes','orcamentos'].forEach(k=>{if(!Array.isArray(D[k]))D[k]=[];});}
 const online=()=>!!(CFG.url&&CFG.chave);
-const hdr=()=>({apikey:CFG.chave,Authorization:'Bearer '+CFG.chave,'Content-Type':'application/json'});
-function setStatus(s){const el=$('#status');el.className='status '+s;el.querySelector('span').textContent={local:'Dados neste computador',online:'Conectado ao Supabase',erro:'Sem conexão com o Supabase',salvando:'Salvando…'}[s];}
+const hdr=()=>CFG.chave.startsWith('sb_')?{apikey:CFG.chave,'Content-Type':'application/json'}:{apikey:CFG.chave,Authorization:'Bearer '+CFG.chave,'Content-Type':'application/json'};
+function setStatus(s){const el=$('#status');el.className='status '+s;el.querySelector('span').textContent={local:'Dados neste aparelho',online:'Conectado ao Supabase',erro:'Sem conexão com o Supabase',salvando:'Salvando…'}[s];}
 async function carregar(){
   try{CFG=JSON.parse(localStorage.getItem(CHAVE_CFG))||{};}catch(e){CFG={};}
   try{D=JSON.parse(localStorage.getItem(CHAVE));}catch(e){D=null;}
@@ -1308,31 +1308,55 @@ function telaConfig(m){
   </section>
   <section class="bloco"><h2>Dados online (Supabase)</h2>
     <p class="dica" style="margin-top:-6px">Sem esta configuração, os dados ficam só neste navegador. Com ela, ficam na nuvem e podem ser acessados de outro computador ou do celular.</p>
-    <div class="campos" style="margin-top:10px"><label class="inteiro">URL do projeto<input id="cf-url" value="${esc(CFG.url||'')}" placeholder="https://xxxx.supabase.co"></label><label class="inteiro">Chave anon (pública)<input id="cf-chave" value="${esc(CFG.chave||'')}"></label></div>
-    <div class="acoes" style="margin-top:12px"><button class="btn" onclick="salvarSupabase()">Salvar e conectar</button><button class="btn btn-sec" onclick="enviarAgora()">Enviar dados deste computador</button>${online()?'<button class="btn btn-perigo" onclick="desconectar()">Desconectar</button>':''}</div>
+    <div class="campos" style="margin-top:10px"><label class="inteiro">URL do projeto<input id="cf-url" value="${esc(CFG.url||'')}" placeholder="https://xxxx.supabase.co"></label><label class="inteiro">Chave pública (anon ou publishable)<input id="cf-chave" value="${esc(CFG.chave||'')}"></label></div>
+    <div class="acoes" style="margin-top:12px"><button class="btn" onclick="salvarSupabase()">Salvar e conectar</button><button class="btn btn-sec" onclick="enviarAgora()">Enviar dados deste aparelho</button>${online()?'<button class="btn btn-perigo" onclick="desconectar()">Desconectar</button>':''}</div>
     <p class="dica" style="margin-top:14px">SQL para criar a tabela no Supabase (SQL Editor):</p><pre class="sql">${esc(SQL)}</pre>
   </section>
   <section class="bloco"><h2>Backup</h2>
     <div class="acoes"><button class="btn btn-sec" onclick="baixarBackup()">Baixar backup</button><label class="btn btn-sec">Restaurar backup<input type="file" accept=".json" style="display:none" onchange="restaurarBackup(this.files[0])"></label><button class="btn btn-perigo" onclick="apagarTudo()">Apagar todos os dados</button></div>
   </section>`;
 }
+function contarDados(d){return d?['lancamentos','compras','receber','contratos','orcamentos'].reduce((n,k)=>n+((d[k]||[]).length),0):0;}
+function resumoDados(d){return `${(d.lancamentos||[]).length} lançamento(s) no caixa, ${(d.compras||[]).length} compra(s)/conta(s) a pagar, ${(d.receber||[]).length} conta(s) a receber, ${(d.contratos||[]).length} contrato(s) e ${(d.orcamentos||[]).length} orçamento(s)`;}
+function usarDadosNuvem(dados){D=dados;normalizar();localStorage.setItem(CHAVE,JSON.stringify(D));setStatus('online');render();}
 async function salvarSupabase(){
   const url=val('cf-url').replace(/\/+$/,''),chave=val('cf-chave');
   if(!url||!chave){toast('Informe a URL e a chave.','erro');return;}
-  CFG={url,chave};localStorage.setItem(CHAVE_CFG,JSON.stringify(CFG));
+  const cfgAntiga=CFG;CFG={url,chave};
+  let j;
   try{
-    const r=await fetch(`${url}/rest/v1/dados_app?id=eq.${REG_ID}&select=dados`,{headers:hdr()});
+    const r=await fetch(`${url}/rest/v1/dados_app?id=eq.${REG_ID}&select=dados,atualizado_em`,{headers:hdr()});
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const j=await r.json();
-    if(j[0]&&j[0].dados){
-      if(confirm('Já existem dados no Supabase.\n\nOK: usar os dados da nuvem neste computador.\nCancelar: substituir a nuvem pelos dados deste computador.')){D=j[0].dados;normalizar();localStorage.setItem(CHAVE,JSON.stringify(D));}
-      else await enviar();
-    }else await enviar();
-    setStatus('online');toast('Conectado ao Supabase.');render();
-  }catch(e){setStatus('erro');toast('Não conectou. Confira a URL, a chave e se a tabela dados_app foi criada.','erro');}
+    j=await r.json();
+  }catch(e){CFG=cfgAntiga;setStatus(online()?'erro':'local');toast('Não conectou. Confira a URL, a chave e se a tabela dados_app foi criada.','erro');return;}
+  const gravarCfg=()=>{CFG={url,chave};localStorage.setItem(CHAVE_CFG,JSON.stringify(CFG));};
+  const nuvem=j[0]&&j[0].dados,qNuvem=contarDados(nuvem),qLocal=contarDados(D);
+  // nuvem vazia: envia o que tem aqui
+  if(!qNuvem){gravarCfg();await enviar();toast('Conectado. Os dados deste aparelho foram enviados para a nuvem.');render();return;}
+  // aparelho vazio: usa a nuvem direto, sem perguntar
+  if(!qLocal){gravarCfg();usarDadosNuvem(nuvem);toast('Conectado. Dados da nuvem carregados neste aparelho.');return;}
+  // os dois têm dados: só grava a conexão depois da escolha
+  CFG=cfgAntiga;
+  abrirModal('Já existem dados na nuvem',`
+    <p><strong>Na nuvem:</strong> ${resumoDados(nuvem)}.${j[0].atualizado_em?` Última gravação em ${new Date(j[0].atualizado_em).toLocaleString('pt-BR')}.`:''}</p>
+    <p><strong>Neste aparelho:</strong> ${resumoDados(D)}.</p>
+    <div class="campos">
+      <label class="inteiro check"><input type="radio" name="sync" value="nuvem" checked onchange="$('#sync-conf').style.display='none'"> <span><strong>Usar os dados da nuvem</strong> (recomendado). Este aparelho passa a mostrar o que já está salvo online.</span></label>
+      <label class="inteiro check"><input type="radio" name="sync" value="aparelho" onchange="$('#sync-conf').style.display='block'"> <span><strong>Substituir a nuvem pelos dados deste aparelho.</strong> Tudo o que está na nuvem será apagado.</span></label>
+      <div id="sync-conf" class="inteiro" style="display:none"><div class="alerta" style="margin:4px 0 8px">Os dados da nuvem serão perdidos e todos os outros aparelhos passarão a mostrar os dados deste. Baixe um backup antes, se tiver dúvida.</div>
+        <label>Para confirmar, digite SUBSTITUIR<input id="sync-txt" autocomplete="off"></label></div>
+    </div>`,()=>{
+      if(document.querySelector('input[name=sync]:checked').value==='nuvem'){gravarCfg();usarDadosNuvem(nuvem);toast('Dados da nuvem carregados neste aparelho.');return;}
+      if(val('sync-txt').toUpperCase()!=='SUBSTITUIR'){toast('Digite SUBSTITUIR para confirmar, ou escolha usar os dados da nuvem.','erro');return false;}
+      gravarCfg();enviar().then(()=>{toast('A nuvem foi substituída pelos dados deste aparelho.');render();});
+    },'Continuar');
 }
-async function enviarAgora(){if(!online()){toast('Configure o Supabase primeiro.','erro');return;}if(!confirm('Substituir os dados da nuvem pelos deste computador?'))return;await enviar();toast('Dados enviados.');}
-function desconectar(){if(!confirm('Desconectar do Supabase? Os dados continuam salvos neste computador.'))return;CFG={};localStorage.removeItem(CHAVE_CFG);setStatus('local');render();}
+async function enviarAgora(){
+  if(!online()){toast('Configure o Supabase primeiro.','erro');return;}
+  if(prompt(`Isto apaga os dados da nuvem e coloca no lugar os dados deste aparelho (${resumoDados(D)}).\n\nPara confirmar, digite SUBSTITUIR`)?.toUpperCase()!=='SUBSTITUIR'){toast('Envio cancelado.');return;}
+  await enviar();toast('Dados enviados para a nuvem.');
+}
+function desconectar(){if(!confirm('Desconectar do Supabase? Os dados continuam salvos neste aparelho.'))return;CFG={};localStorage.removeItem(CHAVE_CFG);setStatus('local');render();}
 function baixarBackup(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(D,null,1)],{type:'application/json'}));a.download=`backup_bom_jesus_financeiro_${hoje()}.json`;document.body.appendChild(a);a.click();a.remove();}
 function restaurarBackup(f){
   if(!f)return;const r=new FileReader();
